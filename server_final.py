@@ -1,11 +1,9 @@
-cat << 'EOF' > /data/server_final.py
 #!/usr/bin/env python3
 import json, threading, time, os, subprocess, glob
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import urlparse
 import cereal.messaging as messaging
 from openpilot.common.params import Params
-import cereal.log as log
 
 HOST, PORT = "0.0.0.0", 7070
 PARAMS = {"personality":"LongitudinalPersonality","follow_distance":"NAPFollowDistance",
@@ -16,10 +14,19 @@ LOCK=threading.Lock(); STOP=threading.Event()
 
 params = Params()
 
+# SURGICAL FIX: Strip .raw from openpilot 0.11+ DynamicEnums before casting
 def num(v,d=0.0):
   try:
+    if hasattr(v, 'raw'): v = v.raw
     x=float(v); return x if x==x and abs(x)!=float("inf") else d
   except Exception: return d
+
+def safe_int(v, d=0):
+  try:
+    if hasattr(v, 'raw'): v = v.raw
+    return int(v)
+  except Exception:
+    return d
 
 def safe_attr(obj, attr, default=0):
   if obj is None: return default
@@ -83,17 +90,26 @@ def get_routes():
   return routes
 
 def telemetry():
-  # Universal Fork Introspection - dynamically check what services the fork's schema actually supports
-  try: available_fields = list(log.Event.schema.fields.keys())
-  except: available_fields = ["carState", "controlsState", "radarState", "longitudinalPlan", "plan"]
-    
-  target_services = ["carState", "selfdriveState", "controlsState", "longitudinalPlan", "plan", "radarState"]
-  valid_services = [s for s in target_services if s in available_fields]
+  # Strictly modern services - 'plan' is dead in OP 0.11
+  target_services = ["carState", "selfdriveState", "controlsState", "longitudinalPlan", "radarState"]
+  valid_services = target_services.copy()
   
-  try: sm = messaging.SubMaster(valid_services)
-  except Exception as e:
-    with LOCK: STATE["errors"]=[f"IPC Schema Error: {str(e)}"]
-    return
+  # Auto-healing connector: If a fork drops a service, identify it and retry seamlessly
+  sm = None
+  while valid_services:
+    try:
+      sm = messaging.SubMaster(valid_services)
+      break
+    except Exception as e:
+      bad_srv = str(e.args[0]) if e.args else str(e)
+      removed = False
+      for s in valid_services.copy():
+        if s in bad_srv:
+          valid_services.remove(s)
+          removed = True
+      if not removed:
+        with LOCK: STATE["errors"]=[f"IPC Bind Error: {str(e)}"]
+        return
 
   tick = 0
   while not STOP.is_set():
@@ -102,19 +118,19 @@ def telemetry():
       cs = sm["carState"] if "carState" in valid_services else None
       sd = sm["selfdriveState"] if "selfdriveState" in valid_services else None
       ctl = sm["controlsState"] if "controlsState" in valid_services else None
-      lp = sm["longitudinalPlan"] if "longitudinalPlan" in valid_services else (sm["plan"] if "plan" in valid_services else None)
+      lp = sm["longitudinalPlan"] if "longitudinalPlan" in valid_services else None
       radar = sm["radarState"] if "radarState" in valid_services else None
       
       if tick % 20 == 0: current_settings = read_params()
       else: current_settings = STATE.get("settings", {})
 
-      # Fallback logic for legacy vs modern OP forks
       enabled = safe_attr(sd, 'enabled', safe_attr(ctl, 'enabled', False))
       active = safe_attr(sd, 'active', safe_attr(ctl, 'active', False))
       exp_mode = safe_attr(sd, 'experimentalMode', safe_attr(ctl, 'experimentalMode', False))
-      pers_raw = int(safe_attr(sd, 'personality', 0))
       
-      # Some forks lack vCruiseCluster, fallback to vCruise
+      # 0.11 DynamicEnum conversion
+      pers_raw = safe_int(safe_attr(sd, 'personality', 0))
+      
       v_cruise = num(safe_attr(cs, 'vCruise', 0))
       v_cruise_cluster = num(safe_attr(cs, 'vCruiseCluster', v_cruise))
 
@@ -135,7 +151,7 @@ def telemetry():
             "experimentalMode":exp_mode,
             "personalityRaw":pers_raw,
             "personality":PERSONALITIES.get(pers_raw, "unknown"),
-            "alertHudVisual":int(safe_attr(sd, 'alertHudVisual', safe_attr(ctl, 'alertHudVisual', 0)))
+            "alertHudVisual":safe_int(safe_attr(sd, 'alertHudVisual', safe_attr(ctl, 'alertHudVisual', 0)))
           },
           "plan":{
             "aTarget":num(safe_attr(lp, 'aTarget', safe_attr(lp, 'aEgoTarget', 0))),
@@ -501,4 +517,3 @@ def main():
   finally:STOP.set();srv.server_close()
 
 if __name__=="__main__":main()
-EOF
