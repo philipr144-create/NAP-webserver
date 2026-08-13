@@ -1,4 +1,4 @@
-# NAP Drive Panel for Comma 3X
+I'm# NAP Drive Panel for Comma 3X
 
 A lightweight, zero-overhead local web dashboard and dashcam viewer designed specifically for custom openpilot forks (like Flowpilot, SunnyPilot, and older Tesla hardware pedal setups). 
 
@@ -39,5 +39,5 @@ This tool requires absolutely zero external dependencies. The entire web server,
 
 1. SSH into your Comma 3X.
 2. Download the script directly to your `/data/` directory:
-
+<COMMA.ip.addy>:7070 using tether i think its 192.168.43.1:7070
 
