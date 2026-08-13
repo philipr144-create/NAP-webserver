@@ -40,6 +40,4 @@ This tool requires absolutely zero external dependencies. The entire web server,
 1. SSH into your Comma 3X.
 2. Download the script directly to your `/data/` directory:
 
-```bash
-cd /data
-wget [https://raw.githubusercontent.com/](https://raw.githubusercontent.com/)<YOUR_GITHUB_USERNAME>/<YOUR_REPO_NAME>/main/server_final.py -O nap_drive.py
+
