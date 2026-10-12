@@ -1,3 +1,7 @@
+*****OUTDATED AND REPLACED*****
+
+
+
 USE server_v18.py comma IP address on port 7074
 
 
